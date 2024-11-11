@@ -1,30 +1,150 @@
-Based on the Movie Plots data( from Friday's class), use topic modeling to group movies in the data set by similarity, as we did in class on Friday (Nov 1). Visualize the results. Can you name the topics?
-Experiment with adjustments to the number of topics, number of clusters, and term weightings in the Document Term Matrix to improve your results.
-Prepare a document using Quarto that contains the R scripts used in your topic modeling. Include visualizations in your docuement (e.g., cluster plots, scree plots for k, gamma plots, and beta plots) and explain their meaning.   (See the ldatuning package for details about scree plots to help pick k for LDA modeling)
+---
+title: "Topic Modelling"
+author: "Jordan Stout"
+date: "2024-11-8"
+output: pdf_document
+---
 
-Make an artsy-looking word cloud.
+```{r setup, warning=FALSE}
+library(tidyverse)
+library(topicmodels)
+library(tidytext)
+library(lexicon)
+library(factoextra)
+library(wordcloud)
 
-gamma - topics per doc
-beta - words per doc
-what IS a topic
+set.seed(100)
 
-
-GROUP MOVIES BY SIMILARITY AKA BY GENRE
-going to us k-means, we can use other clutering alglorithms (gausian mixture modelling?)
-   k = number of clusters
-   you get movie - topic - probability the movie is in that topic
-   then you use pivot to put it in one row
-we are going 8 genres so 8 clusters for k-means
-fviz function to visualize cluster
-use csv with genres to see how how many of each genre are in the movie  list
+knitr::opts_chunk$set(echo = TRUE)
+```
 
 
 ```{r}
-library(topicmodels)
-library(lexicon)
+movies <- read.csv("movie_plots_with_genres.csv")
+plots_by_word <- movies |> unnest_tokens(word,Plot)
+plot_word_counts <- plots_by_word |>  
+  anti_join(stop_words) |> 
+  count(Movie.Name, word, sort=TRUE)
 
-set.seed(123)
-plots <- read.csv("movie_plots.csv")
+data("freq_first_names")
+first_names <- tolower(freq_first_names$Name)
+
+plot_word_counts <- plot_word_counts |> 
+  filter(!(word %in% first_names))
+
+dtm <- plot_word_counts |>  
+  cast_dtm(Movie.Name, word, n)
+
+lda <- LDA(dtm, k = 20, control = list(seed=100))
+
+top_terms <- terms(lda, 10) 
 ```
 
-LDA plot
+Extract greeks
+```{r}
+betas <- tidy(lda, matrix = "beta")
+
+gamma_df <- tidy(lda, matrix = "gamma")
+
+gamma_df <- gamma_df |> 
+  pivot_wider(names_from = topic, values_from = gamma)
+
+cluster <- kmeans(gamma_df |>  
+  select(-document),10)
+```
+
+Take highest gamma for each movie
+```{r}
+top_movies_by_topic <- gamma_df |>
+  pivot_longer(cols = `1`:`20`, names_to = "topic", values_to = "gamma") |> 
+  group_by(document) |>  
+  slice_max(gamma, n = 1) |>  
+  ungroup() |>
+  select(document, topic, gamma)  
+```
+
+But do get a more detailed look, we need to cluster the movies into 10 clusters by topic
+```{r}
+cluster <- kmeans(gamma_df |>  select(-document),10)
+fviz_cluster(cluster, data = gamma_df |> select(-document))
+
+movies <- movies |>
+  distinct(Movie.Name, .keep_all = TRUE)
+
+clusters <- cluster[["cluster"]]
+cluster$cluster <- clusters
+movies$cluster <- clusters
+```
+
+Create clusters
+```{r}
+gamma_df <- gamma_df |>
+  left_join(movies |> select(Movie.Name, cluster), by = c("document" = "Movie.Name"))
+
+cluster_1 <- gamma_df |> filter(cluster == 1)
+
+cluster_2 <- gamma_df |> filter(cluster == 2)
+
+cluster_3 <- gamma_df |> filter(cluster == 3)
+
+cluster_4 <- gamma_df |> filter(cluster == 4)
+
+cluster_5 <- gamma_df |> filter(cluster == 5)
+
+cluster_6 <- gamma_df |> filter(cluster == 6)
+
+cluster_7 <- gamma_df |> filter(cluster == 7)
+
+cluster_8 <- gamma_df |> filter(cluster == 8)
+
+cluster_9 <- gamma_df |> filter(cluster == 9)
+
+cluster_10 <- gamma_df |> filter(cluster == 10)
+```
+
+
+Find which topic is most associated with each cluster
+```{r}
+col_avg <- function(df) {
+  selected_columns <- df |>
+    select(`1`:`20`)
+  
+  column_averages <- colMeans(selected_columns, na.rm = TRUE)
+  
+  return(column_averages)
+}
+
+averages_cluster_1 <- col_avg(cluster_1)
+print(averages_cluster_1)
+```
+We can see that these probailites are pretty small, however a few of them stick out, particuarily topics 4 and 14. This indicates that cluster 1 is most assiciates with topics 4 and 14. 
+
+Make word clouds
+```{r}
+wordcloud <- function(topic_number) {
+  top_words <- betas |>
+    filter(topic == topic_number) |>
+    top_n(30, beta) |>   
+    arrange(desc(beta))
+  
+  wordcloud::wordcloud(words = top_words$term, 
+            freq = top_words$beta, 
+            min.freq = 0, 
+            scale = c(3, 0.5),   
+            random.order = FALSE, 
+            colors = brewer.pal(8, "Dark2"))
+}
+
+avg_6 <- col_avg(cluster_6)
+print(avg_6)
+```
+
+Lets make some fun word clouds
+```{r}
+wordcloud(1)
+wordcloud(2)
+wordcloud(3)
+```
+
+Jon helped me with the word cloud code
+
